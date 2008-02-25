@@ -1,0 +1,13 @@
+## Interface: 20300
+## Title: PerfectRaid IncHeal
+## Author: Mayen
+## Notes: Provides LibHealComm-3.0 support with PerfectRaid
+## OptionalDeps: Dongle, Ace3
+
+Dongle.lua
+libs\LibStub\LibStub.lua
+libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
+libs\LibBabble-Spell-3.0\lib.xml
+libs\LibHealComm-3.0\lib.xml
+
+PerfectRaid_IncHeal.lua
