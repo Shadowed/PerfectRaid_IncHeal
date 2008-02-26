@@ -52,6 +52,7 @@ function Heal:UpdateHealing(target)
 	
 	-- Reduce/increase the healing done if they have a debuff or buff that changes it!
 	amount = amount * HealComm:UnitHealModifierGet(target)
+	amount = math.floor(amount + 0.5)
 	
 	if( amount > 999 ) then 
 		amount = "+" .. string.format("%.1fk", amount / 1000)
