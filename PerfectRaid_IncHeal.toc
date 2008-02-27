@@ -3,6 +3,7 @@
 ## Author: Mayen
 ## Notes: Provides LibHealComm-3.0 support with PerfectRaid
 ## OptionalDeps: Dongle, Ace3
+## RequiredDeps: PerfectRaid
 
 Dongle.lua
 libs\LibStub\LibStub.lua
