@@ -8,6 +8,7 @@ local ourHeals = {}
 function Heal:Initialize()
 	PerfectRaid.defaults.profile.HealEnabled = true
 	PerfectRaid.defaults.profile.HealSelf = true
+	PerfectRaid.defaults.profile.HealAtDeficit = true
 	PerfectRaid.defaults.profile.HealWithin = 60
 
 	playerName = UnitName("player")
@@ -19,7 +20,6 @@ end
 function Heal:Enable()
 	if( not PerfectRaid.db.profile.HealEnabled ) then
 		return
-
 	end
 	
 
@@ -41,6 +41,18 @@ function Heal:ConfigureButton(button)
 	local font = button.raise:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	button.heal = font
 	button.heal:SetTextColor(0, 1, 0)
+	
+	button.status:SetHeight(14)
+end
+
+function Heal:UpdateButtonLayout(button)
+	if( PerfectRaid.db.profile.HealAtDeficit ) then
+		button.heal:ClearAllPoints()
+		button.heal:SetPoint("TOPRIGHT", button.status, "TOPLEFT", -2, -2)
+	else
+		button.heal:ClearAllPoints()
+		button.heal:SetPoint("LEFT", 2, 0)
+	end
 end
 
 function Heal:UNIT_HEALTH(event, unit)
@@ -50,7 +62,6 @@ function Heal:UNIT_HEALTH(event, unit)
 	end
 	
 	-- Makes sure we only update people who are in our raid, party, or it's us
-
 	if( UnitExists(name) ) then
 		self:UpdateHealing(name)
 	end
@@ -83,13 +94,6 @@ function Heal:UpdateHealing(target)
 		amount = ""
 	end
 	
-	-- Hack to make positioning work better
-	local health = UnitHealth(target)
-	local max = UnitHealthMax(target)
-	if( max < health ) then max = health end
-
-	local deficit = max - health
-	
 	for unit, list in pairs(PerfectRaid.frames) do
 		local name, server = UnitName(unit)
 		if( server and server ~= "" ) then
@@ -97,18 +101,8 @@ function Heal:UpdateHealing(target)
 		end
 		
 		if( name == target ) then
-			local hasAggro = (PerfectRaid.aggro[unit] and PerfectRaid.aggro[unit] >= 15)
-			
 			for frame in pairs(list) do
-				if( deficit == 0 and not hasAggro ) then
-					frame.heal:ClearAllPoints()
-					frame.heal:SetPoint("RIGHT", -2, 0)
-					frame.heal:SetText(amount)
-				else
-					frame.heal:ClearAllPoints()
-					frame.heal:SetPoint("TOPRIGHT", frame.status, "TOPLEFT", -2, 0)
-					frame.heal:SetText(amount)
-				end
+				frame.heal:SetText(amount)
 			end
 		end
 	end
@@ -139,6 +133,12 @@ function Heal:DONGLE_PROFILE_CHANGED(event, addon, svname)
 		else
 			self:Disable()
 		end
+		
+		for unit, list in pairs(PerfectRaid.frames) do
+			for button in pairs(list) do
+				self:UpdateButtonLayout(button)
+			end
+		end
 	end
 end
 
@@ -157,6 +157,10 @@ function Heal:CreateOptions(opt)
 
 	local check = CreateFrame("CheckButton", "PRIncHeal_Self", options, "PRCheckTemplate")
 	check.Label:SetText(L["Show your own heals as incomming"])
+	table.insert(options.widgets, check)
+
+	local check = CreateFrame("CheckButton", "PRIncHeal_AtDeficit", options, "PRCheckTemplate")
+	check.Label:SetText(L["Position heals incomming next to health deficit"])
 	table.insert(options.widgets, check)
 
 	local slider = CreateFrame("Slider", "PRIncHeal_Within", options, "PRSliderTemplate")
@@ -194,6 +198,7 @@ function Heal:OnShow()
 
 	PRIncHeal_Enabled:SetChecked(profile.HealEnabled)
 	PRIncHeal_Self:SetChecked(profile.HealSelf)
+	PRIncHeal_AtDeficit:SetChecked(profile.HealAtDeficit)
 	PRIncHeal_Within:SetValue(profile.HealWithin)
 end
 
@@ -202,11 +207,18 @@ function Heal:SaveOptions()
 	
 	profile.HealEnabled = PRIncHeal_Enabled:GetChecked() or false
 	profile.HealSelf = PRIncHeal_Self:GetChecked() or false
+	profile.HealAtDeficit = PRIncHeal_AtDeficit:GetChecked() or false
 	profile.HealWithin = PRIncHeal_Within:GetValue()
 
 	if( not profile.HealEnabled ) then
 		self:Disable()
 	else
 		self:Enable()
+	end
+
+	for unit, list in pairs(PerfectRaid.frames) do
+		for button in pairs(list) do
+			self:UpdateButtonLayout(button)
+		end
 	end
 end
