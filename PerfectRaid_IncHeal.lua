@@ -38,6 +38,11 @@ function Heal:Disable()
 end
 
 function Heal:ConfigureButton(button)
+	if( not button.raise ) then
+		button.raise = CreateFrame("Frame", nil, button.healthbar)
+		button.raise:SetAllPoints()
+	end
+	
 	local font = button.raise:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
 	button.heal = font
 	button.heal:SetTextColor(0, 1, 0)
@@ -49,7 +54,6 @@ function Heal:UpdateButtonLayout(button)
 
 	end
 	
-
 	if( PerfectRaid.db.profile.HealAtDeficit ) then
 		button.heal:ClearAllPoints()
 		button.heal:SetPoint("TOPRIGHT", button.status, "TOPLEFT", -2, -2)
