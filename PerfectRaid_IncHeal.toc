@@ -1,5 +1,5 @@
-## Interface: 20300
-## Title: PerfectRaid IncHeal
+## Interface: 30000
+## Title: PerfectRaid (Incoming Heal)
 ## Author: Mayen
 ## Notes: Provides LibHealComm-3.0 support with PerfectRaid
 ## OptionalDeps: Dongle, Ace3
