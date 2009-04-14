@@ -1,4 +1,4 @@
-## Interface: 30000
+## Interface: 30100
 ## Title: PerfectRaid (Incoming Heal)
 ## Author: Mayen
 ## Notes: Provides LibHealComm-3.0 support with PerfectRaid
