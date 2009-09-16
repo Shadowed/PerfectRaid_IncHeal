@@ -2,34 +2,24 @@ local Heal = PerfectRaid:NewModule("PerfectRaid-Heal")
 local L = PRIncHealLocals
 
 local HealComm
-local playerName
-local ourHeals = {}
 
 function Heal:Initialize()
 	PerfectRaid.defaults.profile.HealEnabled = true
 	PerfectRaid.defaults.profile.HealSelf = true
 	PerfectRaid.defaults.profile.HealAtDeficit = true
 	PerfectRaid.defaults.profile.HealWithin = 60
-
-	playerName = UnitName("player")
 	
 	self:RegisterMessage("DONGLE_PROFILE_CHANGED")
-	HealComm = LibStub:GetLibrary("LibHealComm-3.0")
+	HealComm = LibStub:GetLibrary("LibHealComm-4.0")
 end
 
 function Heal:Enable()
-	if( not PerfectRaid.db.profile.HealEnabled ) then
-		return
-	end
-	
-
-	self:RegisterEvent("UNIT_HEALTH")
-	self:RegisterEvent("UNIT_HEALTH_MAX", "UNIT_HEALTH")
-
-	HealComm.RegisterCallback(self, "HealComm_DirectHealStart", "DirectHealStart")
-	HealComm.RegisterCallback(self, "HealComm_DirectHealStop", "DirectHealStop")
-	HealComm.RegisterCallback(self, "HealComm_DirectHealDelayed", "DirectHealDelayed")
-	HealComm.RegisterCallback(self, "HealComm_HealModifierUpdate", "HealModifierUpdate")
+	if( not PerfectRaid.db.profile.HealEnabled ) then return end
+	HealComm.RegisterCallback(self, "HealComm_HealStarted", "HealComm_HealUpdated")
+	HealComm.RegisterCallback(self, "HealComm_HealStopped", "HealComm_HealUpdated")
+	HealComm.RegisterCallback(self, "HealComm_HealDelayed", "HealComm_HealUpdated")
+	HealComm.RegisterCallback(self, "HealComm_HealUpdated")
+	HealComm.RegisterCallback(self, "HealComm_ModifierChanged")
 end
 
 function Heal:Disable()
@@ -49,10 +39,7 @@ function Heal:ConfigureButton(button)
 end
 
 function Heal:UpdateButtonLayout(button)
-	if( not button.heal ) then
-		return
-
-	end
+	if( not button.heal ) then return end
 	
 	if( PerfectRaid.db.profile.HealAtDeficit ) then
 		button.heal:ClearAllPoints()
@@ -64,33 +51,12 @@ function Heal:UpdateButtonLayout(button)
 	end
 end
 
-function Heal:UNIT_HEALTH(event, unit)
-	local name, server = UnitName(unit)
-	if( server and server ~= "" ) then
-		name = name .. "-" .. server
-	end
-	
-	-- Makes sure we only update people who are in our raid, party, or it's us
-	if( UnitExists(name) ) then
-		self:UpdateHealing(name)
-	end
-end
-
-function Heal:UpdateIncomming(healer, amount, ...)
-	for i=1, select("#", ...) do
-		local target = select(i, ...)
-		if( healer == playerName ) then
-			ourHeals[target] = amount
-		end
-		
-		self:UpdateHealing(target)
-	end
-end
-
-function Heal:UpdateHealing(target)
-	local amount = HealComm:UnitIncomingHealGet(target, GetTime() + PerfectRaid.db.profile.HealWithin) or 0
-	if( ourHeals[target] and PerfectRaid.db.profile.HealSelf ) then
-		amount = amount + ourHeals[target]
+function Heal:UpdateHealing(frame)
+	local amount
+	if( PerfectRaid.db.profile.HealSelf ) then
+		amount = HealComm:GetHealAmount(guid, HealComm.ALL_HEALS, GetTime() + PerfectRaid.db.profile.HealWithin)
+	else
+		amount = HealComm:GetOthersHealAmount(guid, HealComm.ALL_HEALS, GetTime() + PerfectRaid.db.profile.HealWithin)
 	end
 	
 	-- Reduce/increase the healing done if they have a debuff or buff that changes it!
@@ -98,40 +64,37 @@ function Heal:UpdateHealing(target)
 	amount = math.floor(amount + 0.5)
 	
 	if( amount > 999 ) then 
-		amount = "+" .. string.format("%.1fk", amount / 1000)
-	elseif( amount == 0 ) then
-		amount = ""
+		frame.heal:SetFormattedText("+%.1fk", amount / 1000)
+	elseif( amount > 0 ) then
+		frame.heal:SetFormattedText("+%d", amount)
+	else
+		frame.heal:SetText("")
+	end
+end
+
+local tempTableMap = {}
+function Heal:UpdateIncoming(...)
+	table.wipe(tempTableMap)
+	for i=1, select("#", ...) do
+		tempTableMap[select(i, ...)] = true
 	end
 	
 	for unit, list in pairs(PerfectRaid.frames) do
-		local name, server = UnitName(unit)
-		if( server and server ~= "" ) then
-			name = name .. "-" .. server
-		end
-		
-		if( name == target ) then
+		local guid = UnitGUID(unit)
+		if( guid and tempTableMap[guid] ) then
 			for frame in pairs(list) do
-				frame.heal:SetText(amount)
+				self:UpdateHealing(frame)
 			end
 		end
 	end
 end
 
--- Handle callbacks from HealComm
-function Heal:DirectHealStart(event, healerName, amount, endTime, ...)
-	self:UpdateIncomming(healerName, amount, ...)
+function Heal:HealComm_HealUpdated(event, casterGUID, spellID, healType, endTime, ...)
+	self:UpdateIncoming(...)
 end
 
-function Heal:DirectHealStop(event, healerName, amount, succeeded, ...)
-	self:UpdateIncomming(healerName, 0, ...)
-end
-
-function Heal:DirectHealDelayed(event, healerName, amount, endTime, ...)
-	self:UpdateIncomming(healerName, amount, ...)
-end
-
-function Heal:HealModifierUpdate(event, unit, targetName, healMod)
-	self:UpdateHealing(targetName)
+function Heal:HealComm_ModifierChanged(event, guid)
+	self:UpdateIncoming(guid)
 end
 
 -- Config
