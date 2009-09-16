@@ -1,14 +1,15 @@
-## Interface: 30100
+## Interface: 30200
 ## Title: PerfectRaid (Incoming Heal)
-## Author: Mayen
-## Notes: Provides LibHealComm-3.0 support with PerfectRaid
-## OptionalDeps: Dongle, Ace3
+## Author: Shadowed
+## Notes: Provides LibHealComm-4.0 support with PerfectRaid
 ## RequiredDeps: PerfectRaid
 
 Dongle.lua
 libs\LibStub\LibStub.lua
 libs\CallbackHandler-1.0\CallbackHandler-1.0.xml
-libs\LibHealComm-3.0\lib.xml
+libs\LibHealComm-4.0\LibHealComm-4.0.xml
+libs\LibWrapperHealComm-1.0\LibWrapperHealComm-1.0.xml
+
 
 localization.enUS.lua
 
