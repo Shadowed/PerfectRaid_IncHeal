@@ -7,19 +7,22 @@ function Heal:Initialize()
 	PerfectRaid.defaults.profile.HealEnabled = true
 	PerfectRaid.defaults.profile.HealSelf = true
 	PerfectRaid.defaults.profile.HealAtDeficit = true
-	PerfectRaid.defaults.profile.HealWithin = 60
-	
+	PerfectRaid.defaults.profile.HealWithin = 4
+		
 	self:RegisterMessage("DONGLE_PROFILE_CHANGED")
 	HealComm = LibStub:GetLibrary("LibHealComm-4.0")
 end
 
 function Heal:Enable()
 	if( not PerfectRaid.db.profile.HealEnabled ) then return end
+	PerfectRaid.db.profile.HealWithin = math.max(PerfectRaid.db.profile.HealWithin, 4)
+
 	HealComm.RegisterCallback(self, "HealComm_HealStarted", "HealComm_HealUpdated")
 	HealComm.RegisterCallback(self, "HealComm_HealStopped", "HealComm_HealUpdated")
 	HealComm.RegisterCallback(self, "HealComm_HealDelayed", "HealComm_HealUpdated")
 	HealComm.RegisterCallback(self, "HealComm_HealUpdated")
-	HealComm.RegisterCallback(self, "HealComm_ModifierChanged")
+	HealComm.RegisterCallback(self, "HealComm_ModifierChanged", "HealComm_GUIDChanged")
+	HealComm.RegisterCallback(self, "HealComm_GUIDDisappeared", "HealComm_GUIDChanged")
 end
 
 function Heal:Disable()
@@ -51,17 +54,16 @@ function Heal:UpdateButtonLayout(button)
 	end
 end
 
-function Heal:UpdateHealing(frame)
+function Heal:UpdateHealing(frame, guid)
 	local amount
 	if( PerfectRaid.db.profile.HealSelf ) then
-		amount = HealComm:GetHealAmount(guid, HealComm.ALL_HEALS, GetTime() + PerfectRaid.db.profile.HealWithin)
+		amount = HealComm:GetHealAmount(guid, HealComm.ALL_HEALS, GetTime() + PerfectRaid.db.profile.HealWithin) or 0
 	else
-		amount = HealComm:GetOthersHealAmount(guid, HealComm.ALL_HEALS, GetTime() + PerfectRaid.db.profile.HealWithin)
+		amount = HealComm:GetOthersHealAmount(guid, HealComm.ALL_HEALS, GetTime() + PerfectRaid.db.profile.HealWithin) or 0
 	end
-	
+		
 	-- Reduce/increase the healing done if they have a debuff or buff that changes it!
-	amount = amount * HealComm:UnitHealModifierGet(target)
-	amount = math.floor(amount + 0.5)
+	amount = amount * HealComm:GetHealModifier(guid)
 	
 	if( amount > 999 ) then 
 		frame.heal:SetFormattedText("+%.1fk", amount / 1000)
@@ -83,7 +85,7 @@ function Heal:UpdateIncoming(...)
 		local guid = UnitGUID(unit)
 		if( guid and tempTableMap[guid] ) then
 			for frame in pairs(list) do
-				self:UpdateHealing(frame)
+				self:UpdateHealing(frame, guid)
 			end
 		end
 	end
@@ -93,7 +95,7 @@ function Heal:HealComm_HealUpdated(event, casterGUID, spellID, healType, endTime
 	self:UpdateIncoming(...)
 end
 
-function Heal:HealComm_ModifierChanged(event, guid)
+function Heal:HealComm_GUIDChanged(event, guid)
 	self:UpdateIncoming(guid)
 end
 
@@ -137,9 +139,9 @@ function Heal:CreateOptions(opt)
 
 	local slider = CreateFrame("Slider", "PRIncHeal_Within", options, "PRSliderTemplate")
 	slider.Text:SetText(L["Show heals incomming within"])
-	slider.High:SetText("60")
+	slider.High:SetText("5")
 	slider.Low:SetText("0")
-	slider:SetMinMaxValues(0, 60)
+	slider:SetMinMaxValues(0, 5)
 	slider:SetValueStep(0.5)
 	table.insert(options.widgets, slider)
 
