@@ -1,5 +1,5 @@
 local major = "LibHealComm-4.0"
-local minor = 31
+local minor = 38
 assert(LibStub, string.format("%s requires LibStub.", major))
 
 local HealComm = LibStub:NewLibrary(major, minor)
@@ -332,8 +332,51 @@ HealComm.protectedMap = HealComm.protectedMap or setmetatable({}, {
 	__metatable = false
 })
 
-function HealComm:GetGuidUnitMapTable()
+function HealComm:GetGUIDUnitMapTable()
 	return HealComm.protectedMap
+end
+
+-- Gets the next heal landing on someone using the passed filters
+function HealComm:GetNextHealAmount(guid, bitFlag, time, ignoreGUID)
+	local healTime, healAmount, healFrom
+	local currentTime = GetTime()
+	
+	for casterGUID, spells in pairs(pendingHeals) do
+		for _, pending in pairs(spells) do
+			if( pending.bitType and bit.band(pending.bitType, bitFlag) > 0 ) then
+				for i=1, #(pending), 5 do
+					local guid = pending[i]
+					if( not ignoreGUID or ignoreGUID ~= guid ) then
+						local amount = pending[i + 1]
+						local stack = pending[i + 2]
+						local endTime = pending[i + 3]
+						endTime = endTime > 0 and endTime or pending.endTime
+							
+						-- Direct heals are easy, if they match the filter then return them
+						if( ( pending.bitType == DIRECT_HEALS or pending.bitType == BOMB_HEALS ) and ( not time or endTime <= time ) ) then
+							if( not healTime or endTime < healTime ) then
+								healTime = endTime
+								healAmount = amount * stack
+								healFrom = casterGUID
+							end
+							
+						-- Channeled heals and hots, have to figure out how many times it'll tick within the given time band
+						elseif( pending.bitType == CHANNEL_HEALS or pending.bitType == HOT_HEALS ) then
+							local secondsLeft = time and time - currentTime or endTime - currentTime
+							local nextTick = currentTime + (secondsLeft % pending.tickInterval)
+							if( not healTime or nextTick < healTime ) then
+								healTime = nextTick
+								healAmount = amount * stack
+								healFrom = casterGUID
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+	
+	return healTime, healFrom, healAmount
 end
 
 -- Get the healing amount that matches the passed filters
@@ -873,7 +916,7 @@ if( playerClass == "PRIEST" ) then
 	LoadClassData = function()
 		-- Hot data
 		local Renew = GetSpellInfo(139)
-		hotData[Renew] = {coeff = 1, interval = 3, ticks = 5, levels = {8, 14, 20, 26, 32, 38, 44, 50, 56, 60, 65, 70, 75, 80}, averages = {45, 1009, 175, 245, 315, 400, 510, 650, 810, 970, 1010, 1110, 1235, 1400}}
+		hotData[Renew] = {coeff = 1, interval = 3, ticks = 5, levels = {8, 14, 20, 26, 32, 38, 44, 50, 56, 60, 65, 70, 75, 80}, averages = {45, 100, 175, 245, 315, 400, 510, 650, 810, 970, 1010, 1110, 1235, 1400}}
 		--local GlyphofPoH = GetSpellInfo(56161)
 		--hotData[GlyphofPoH] = {isMulti = true, interval = 3}
 		
@@ -1243,11 +1286,11 @@ HealComm.selfModifiers = HealComm.selfModifiers or {
 
 local function getName(spellID)
 	local name = GetSpellInfo(spellID)
-	--[===[@debug@
+	--@debug@
 	if( not name ) then
 		print(string.format("%s-r%s: Failed to find spellID %d", major, minor, spellID))
 	end
-	--@end-debug@]===]
+	--@end-debug@
 	return name or ""
 end
 
@@ -1292,6 +1335,7 @@ HealComm.healingModifiers = HealComm.healingModifiers or {
 	[getName(43410)] = 0.90, -- Chop
 	[getName(34123)] = 1.06, -- Tree of Life
 	[getName(64844)] = 1.10, -- Divine Hymn
+	--[getName(70772)] = 1.10, -- Priest T10 Healer 2P
 	[getName(47788)] = 1.40, -- Guardian Spirit
 	[getName(38387)] = 1.50, -- Bane of Infinity
 	[getName(31977)] = 1.50, -- Curse of Infinity
@@ -2027,8 +2071,14 @@ function HealComm:UNIT_SPELLCAST_SENT(unit, spellName, spellRank, castOn)
 		guidPriorities[lastSentID] = nil
 		setCastData(5, mouseoverName, mouseoverGUID)
 	else
+		-- If the player is ungrouped and healing, you can't take advantage of the name -> "unit" map, look in the UnitIDs that would most likely contain the information that's needed.
+		local guid = UnitGUID(castOn)
+		if( not guid ) then
+			guid = UnitName("target") == castTarget and UnitGUID("target") or UnitName("focus") == castTarget and UnitGUID("focus") or UnitName("mouseover") == castTarget and UnitGUID("mouseover") or UnitName("targettarget") == castTarget and UnitGUID("target") or UnitName("focustarget") == castTarget and UnitGUID("focustarget")
+		end
+		
 		guidPriorities[lastSentID] = nil
-		setCastData(0, nil, UnitGUID(castOn))
+		setCastData(0, nil, guid)
 	end
 end
 
@@ -2066,6 +2116,7 @@ function HealComm:UNIT_SPELLCAST_STOP(unit, spellName, spellRank, id)
 	if( unit ~= "player" or not spellData[spellName] or id ~= castID ) then return end
 	local nameID = spellName .. spellRank
 	
+	castID = nil
 	parseHealEnd(playerGUID, nil, "name", self.spellToID[spellName .. spellRank], true)
 	sendMessage(string.format("S::%d:1", self.spellToID[spellName .. spellRank] or 0))
 end
@@ -2074,6 +2125,7 @@ function HealComm:UNIT_SPELLCAST_CHANNEL_STOP(unit, spellName, spellRank, id)
 	if( unit ~= "player" or not spellData[spellName] or id ~= castID ) then return end
 	local nameID = spellName .. spellRank
 
+	castID = nil
 	parseHealEnd(playerGUID, nil, "name", self.spellToID[nameID], false)
 	sendMessage(string.format("S::%d:0", self.spellToID[nameID] or 0))
 end
@@ -2201,7 +2253,8 @@ HealComm.UseAction = HealComm.CastSpell
 -- Make sure we don't have invalid units in this
 local function sanityCheckMapping()
 	for guid, unit in pairs(guidToUnit) do
-		if( not UnitExists(unit) or UnitGUID(unit) ~= guid ) then
+		-- Unit no longer exists, remove all healing for them
+		if( not UnitExists(unit) ) then
 			-- Check for (and remove) any active heals
 			if( pendingHeals[guid] ) then
 				for id, pending in pairs(pendingHeals[guid]) do
@@ -2239,12 +2292,9 @@ if( not HealComm.hotMonitor ) then
 		for guid in pairs(activeHots) do
 			if( guidToUnit[guid] and not UnitIsVisible(guidToUnit[guid]) ) then
 				removeAllRecords(guid)
-				
-				guidToUnit[guid] = nil
-				guidToGroup[guid] = nil
+			else
+				found = true
 			end
-		
-			found = true
 		end
 		
 		if( not found ) then
@@ -2262,7 +2312,6 @@ local function clearGUIDData()
 	table.wipe(decompressGUID)
 	table.wipe(activePets)
 	
-	-- UnitGUID("player") seems to return nil if a group is disbanded while zoning, odd but this will fix that
 	playerGUID = playerGUID or UnitGUID("player")
 	HealComm.guidToUnit = {[playerGUID] = "player"}
 	guidToUnit = HealComm.guidToUnit
@@ -2313,7 +2362,7 @@ function HealComm:PARTY_MEMBERS_CHANGED()
 	end
 	
 	-- Parties are not considered groups in terms of API, so fake it and pretend they are all in group 0
-	guidToGroup[UnitGUID("player")] = 0
+	guidToGroup[playerGUID or UnitGUID("player")] = 0
 	if( not wasInParty ) then self:UNIT_PET("player") end
 	
 	for i=1, MAX_PARTY_MEMBERS do
@@ -2374,12 +2423,6 @@ end
 
 -- Initialize the library
 function HealComm:OnInitialize()
-	playerGUID = UnitGUID("player")
-	playerName = UnitName("player")
-
-	-- Oddly enough player GUID is not available on file load, so keep the map of player GUID to themselves too
-	guidToUnit[playerGUID] = "player"
-
 	-- If another instance already loaded then the tables should be wiped to prevent old data from persisting
 	-- in case of a spell being removed later on, only can happen if a newer LoD version is loaded
 	table.wipe(spellData)
@@ -2406,7 +2449,6 @@ function HealComm:OnInitialize()
 	end
 	
 	self:PLAYER_EQUIPMENT_CHANGED()
-	self:ZONE_CHANGED_NEW_AREA()
 	
 	-- When first logging in talent data isn't available until at least PLAYER_ALIVE, so if we don't have data
 	-- will wait for that event otherwise will just cache it right now
@@ -2473,23 +2515,34 @@ end
 -- Event handler
 HealComm.frame = HealComm.frame or CreateFrame("Frame")
 HealComm.frame:UnregisterAllEvents()
-HealComm.frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
-HealComm.frame:RegisterEvent("PARTY_MEMBERS_CHANGED")
-HealComm.frame:RegisterEvent("RAID_ROSTER_UPDATE")
 HealComm.frame:RegisterEvent("UNIT_PET")
 HealComm.frame:SetScript("OnEvent", OnEvent)
 
-if( not isHealerClass ) then return end
-
--- If the player is not logged in yet, then we're still loading and will watch for PLAYER_LOGIN to assume everything is initialized
--- if we're already logged in then it was probably LOD loaded
+-- At PLAYER_LEAVING_WORLD (Actually more like MIRROR_TIMER_STOP but anyway) UnitGUID("player") returns nil, delay registering
+-- events and set a playerGUID/playerName combo for all players on PLAYER_LOGIN not just the healers.
 function HealComm:PLAYER_LOGIN()
-	self:OnInitialize()
+	playerGUID = UnitGUID("player")
+	playerName = UnitName("player")
+
+	-- Oddly enough player GUID is not available on file load, so keep the map of player GUID to themselves too
+	guidToUnit[playerGUID] = "player"
+
+	if( isHealerClass ) then
+		self:OnInitialize()
+	end
+
 	self.frame:UnregisterEvent("PLAYER_LOGIN")
+	self.frame:RegisterEvent("ZONE_CHANGED_NEW_AREA")
+	self.frame:RegisterEvent("PARTY_MEMBERS_CHANGED")
+	self.frame:RegisterEvent("RAID_ROSTER_UPDATE")
+	
+	self:ZONE_CHANGED_NEW_AREA()
+	self:RAID_ROSTER_UPDATE()
+	self:PARTY_MEMBERS_CHANGED()
 end
 
 if( not IsLoggedIn() ) then
 	HealComm.frame:RegisterEvent("PLAYER_LOGIN")
 else
-	HealComm:OnInitialize()
+	HealComm:PLAYER_LOGIN()
 end

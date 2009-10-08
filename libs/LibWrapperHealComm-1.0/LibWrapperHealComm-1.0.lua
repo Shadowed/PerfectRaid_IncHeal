@@ -1,5 +1,5 @@
 local major = "LibWrapperHealComm-1.0"
-local minor = 6
+local minor = 7
 assert(LibStub, string.format("%s requires LibStub.", major))
 
 local CommWrapper = LibStub:NewLibrary(major, minor)
@@ -192,14 +192,11 @@ local function parseHealEnd(casterGUID, spellName)
 	table.wipe(tempPlayerList)
 	
 	local pending = pendingHeals[casterGUID][spellName]
-	for i=#(pending), 1, -5 do
-		table.insert(tempPlayerList, pending[i - 4])
-		HealComm40.removeRecord(pending, pending[i - 4])
-	end
+	for i=#(pending), 1, -5 do table.insert(tempPlayerList, pending[i - 4]) end
 
 	if( #(tempPlayerList) > 0 ) then
 		HealComm40.callbacks:Fire("HealComm_HealStopped", casterGUID, pending.spellID, pending.bitType, false, unpack(tempPlayerList))
-		table.wipe(pendingHeals)
+		table.wipe(pending)
 	end
 end
 
@@ -208,8 +205,7 @@ local function extractRealm(fullName)
 	return select(2, string.split('-', fullName, 2))
 end
 
--- Convert a remotely generated fully qualified name to
--- a local fully qualified name.
+-- Convert a remotely generated fully qualified name to a local fully qualified name.
 local playerRealm = GetRealmName()
 
 local function convertRealm(fullName, remoteRealm)
