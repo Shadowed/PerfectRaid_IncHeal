@@ -1,5 +1,5 @@
 local major = "LibWrapperHealComm-1.0"
-local minor = 7
+local minor = 8
 assert(LibStub, string.format("%s requires LibStub.", major))
 
 local CommWrapper = LibStub:NewLibrary(major, minor)
@@ -57,7 +57,6 @@ end
 -- Handles registering and unregistering the callbacks to support sending heals in LHC-3.0 format
 function CommWrapper:Update()
 	playerGUID = UnitGUID("player")
-		
 	HealComm40.UnregisterAllCallbacks(CommWrapper)
 	
 	if( not self.disableSending30 and not self.playerHasHC and self.groupHasHC30 ) then
@@ -165,41 +164,6 @@ end
 
 CommWrapper.RAID_ROSTER_UPDATE = CommWrapper.PARTY_MEMBERS_CHANGED
 
--- It's ugly to be directly referencing tables like this, but it's the quickest solution
-local tempPlayerList = {}
-local function parseDirectHeal(casterGUID, spellName, amount, endTime, ...)
-	local pendingHeals = HealComm40.pendingHeals
-	pendingHeals[casterGUID] = pendingHeals[casterGUID] or {}
-	pendingHeals[casterGUID][spellName] = pendingHeals[casterGUID][spellName] or {}
-
-	local pending = pendingHeals[casterGUID][spellName]
-	table.wipe(pending)
-	pending.endTime = endTime
-	pending.spellID = CommWrapper.spellNameToID[spellName] or 0
-	pending.bitType = HealComm40.DIRECT_HEALS
-
-	for i=1, select("#", ...) do
-		HealComm40.updateRecord(pending, select(i, ...), math.floor(amount), 1)
-	end
-	
-	HealComm40.callbacks:Fire("HealComm_HealStarted", casterGUID, pending.spellID, pending.bitType, pending.endTime, ...)
-end
-
-local function parseHealEnd(casterGUID, spellName)
-	local pendingHeals = HealComm40.pendingHeals
-	if( not pendingHeals[casterGUID] or not pendingHeals[casterGUID][spellName] ) then return end
-	
-	table.wipe(tempPlayerList)
-	
-	local pending = pendingHeals[casterGUID][spellName]
-	for i=#(pending), 1, -5 do table.insert(tempPlayerList, pending[i - 4]) end
-
-	if( #(tempPlayerList) > 0 ) then
-		HealComm40.callbacks:Fire("HealComm_HealStopped", casterGUID, pending.spellID, pending.bitType, false, unpack(tempPlayerList))
-		table.wipe(pending)
-	end
-end
-
 -- Yoinked from LHC-3
 local function extractRealm(fullName)
 	return select(2, string.split('-', fullName, 2))
@@ -225,15 +189,20 @@ local function convertRealm(fullName, remoteRealm)
 end
 
 local function loadPlayers(sender, ...)
-	table.wipe(tempPlayerList)
-	
+	local players
 	local senderRealm = extractRealm(sender)
 	for i=1, select("#", ...) do
 		local guid = UnitGUID(convertRealm(select(i, ...), senderRealm))
 		if( guid ) then
-			table.insert(tempPlayerList, guid)
+			if( players ) then
+				players = players .. "," .. HealComm40.compressGUID[guid]
+			else
+				players = HealComm40.compressGUID[guid]
+			end
 		end
 	end
+	
+	return players
 end
 
 -- Handle parsing all the fun stuff
@@ -266,34 +235,35 @@ function CommWrapper:CHAT_MSG_ADDON(prefix, message, channel, sender)
 		if( commType == 0 ) then
 			local heal = tonumber(string.sub(message, 4, 8))
 			local target = string.sub(message, 9, -1)
-			local spellName, _, _, _, _, endTime = UnitCastingInfo(sender)
+			local spellName = UnitCastingInfo(sender)
 			local guid = UnitGUID(convertRealm(target, extractRealm(sender)))
 			
-			if( heal and target and endTime and guid and spellName ) then
-				endTime = endTime / 1000
+			if( heal and target and guid and spellName ) then
 				self.lastCast[casterGUID] = spellName
 				
-				parseDirectHeal(casterGUID, spellName, heal, endTime, guid)
+				--table.insert(TestLog, {"Heal started", message, casterGUID, spellName, heal, target, guid, HealComm40.compressGUID[guid]})
+				HealComm40.parseDirectHeal(casterGUID, CommWrapper.spellNameToID[spellName] or 0, heal, HealComm40.compressGUID[guid])
 			end
 			
 		-- Multi target heal started
 		elseif( commType == 2 or commType == 3 ) then
 			local heal = tonumber(string.sub(message, 4, 8))
 			local targets = string.sub(message, 9, -1)
-			local spellName, _, _, _, _, endTime = UnitCastingInfo(sender)
+			local spellName = UnitCastingInfo(sender)
 
-			if( heal and targets and endTime and spellName ) then
-				loadPlayers(sender, string.split(":", targets))
-				if( #(tempPlayerList) == 0 ) then return end
-				
-				endTime = endTime / 1000
+			if( heal and targets and spellName ) then
+				local players = loadPlayers(sender, string.split(":", targets))
+				if( not players ) then return end
+
 				self.lastCast[casterGUID] = spellName
-				
-				parseDirectHeal(casterGUID, spellName, heal, endTime, unpack(tempPlayerList))
+
+				--table.insert(TestLog, {"Heal started", message, casterGUID, spellName, heal, targets, players})
+				HealComm40.parseDirectHeal(casterGUID, self.spellNameToID[spellName] or 0, heal, players)
 			end
 		-- Heal stopped
 		elseif( commType == 1 and self.lastCast[casterGUID] ) then
-			parseHealEnd(casterGUID, self.lastCast[casterGUID])
+			--table.insert(TestLog, {"Heal stopped", message, casterGUID, self.lastCast[casterGUID]})
+			HealComm40.parseHealEnd(casterGUID, nil, "name", self.spellNameToID[self.lastCast[casterGUID]] or 0, string.sub(message, 4, 4) ~= "S")
 		end
 		
 	-- If we see any message from LHC-4.0, automatically blacklist that user and ignore any data they sent from HC
